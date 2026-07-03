@@ -51,14 +51,12 @@ def check_dependencies():
         print(f"[ERROR] 需要 Python >= 3.6，当前: {sys.version}")
         sys.exit(1)
 
-    if sys.platform != "win32":
-        print("[ERROR] 本脚本仅支持 Windows 平台")
-        sys.exit(1)
-
-    for cmd in ("reg", "tasklist"):
-        if not _command_available([cmd, "/?"]):
-            print(f"[ERROR] 系统缺少 {cmd} 命令")
-            sys.exit(1)
+    # Windows: 检查 reg / tasklist
+    if sys.platform == "win32":
+        for cmd in ("reg", "tasklist"):
+            if not _command_available([cmd, "/?"]):
+                print(f"[ERROR] 系统缺少 {cmd} 命令")
+                sys.exit(1)
 
 
 def _command_available(cmd_args):
@@ -72,10 +70,10 @@ def _command_available(cmd_args):
 
 
 # ============================================================
-# 自动探测
+# 自动探测（Windows / macOS / Linux）
 # ============================================================
 
-# 注册表候选键（覆盖常见安装位置）
+# --- Windows 注册表候选键 ---
 REG_HIVES = [
     (r"HKCU\Software\GitHubDesktop", "InstallPath"),
     (r"HKLM\SOFTWARE\GitHubDesktop", "InstallPath"),
@@ -84,32 +82,46 @@ REG_HIVES = [
     (r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\GitHubDesktop_is1", "InstallLocation"),
 ]
 
-# 常见安装根路径
-COMMON_PATHS = [
-    os.path.expandvars(r"%LOCALAPPDATA%\GitHubDesktop"),
-    os.path.expandvars(r"%APPDATA%\GitHubDesktop"),
-    os.path.expandvars(r"%ProgramFiles%\GitHubDesktop"),
-    os.path.expandvars(r"%ProgramW6432%\GitHubDesktop"),
-    r"C:\Program Files\GitHubDesktop",
-    r"D:\Program Files\GitHubDesktop",
-]
+# --- 各平台常见安装根路径 ---
+_COMMON_PATHS = {
+    "win32": [
+        os.path.expandvars(r"%LOCALAPPDATA%\GitHubDesktop"),
+        os.path.expandvars(r"%APPDATA%\GitHubDesktop"),
+        os.path.expandvars(r"%ProgramFiles%\GitHubDesktop"),
+        os.path.expandvars(r"%ProgramW6432%\GitHubDesktop"),
+        r"C:\Program Files\GitHubDesktop",
+        r"D:\Program Files\GitHubDesktop",
+    ],
+    "darwin": [
+        "/Applications/GitHub Desktop.app/Contents",
+        os.path.expanduser("~/Applications/GitHub Desktop.app/Contents"),
+    ],
+    "linux": [
+        "/usr/share/github-desktop",
+        "/opt/github-desktop",
+        os.path.expanduser("~/.local/share/github-desktop"),
+        os.path.expanduser("~/github-desktop"),
+    ],
+}
 
 
 def find_gh_desktop():
     """探测 GH 安装目录，返回 (target_path, mode)。
-    mode: 'loose' = resources\\app 目录; 'asar' = resources\\app.asar 文件。
+    mode: 'loose' = resources/app 目录; 'asar' = resources/app.asar 文件。
     失败返回 (None, None)。
     """
-    # ① 注册表
-    for hive, value_name in REG_HIVES:
-        path = _query_reg(hive, value_name)
-        if path:
-            result = _probe_resources(path)
-            if result:
-                return result
+    # ① Windows: 注册表
+    if sys.platform == "win32":
+        for hive, value_name in REG_HIVES:
+            path = _query_reg(hive, value_name)
+            if path:
+                result = _probe_resources(path)
+                if result:
+                    return result
 
-    # ② 常见路径
-    for p in COMMON_PATHS:
+    # ② 各平台常见路径
+    paths = _COMMON_PATHS.get(sys.platform, _COMMON_PATHS["linux"])
+    for p in paths:
         if os.path.isdir(p):
             result = _probe_resources(p)
             if result:
@@ -633,15 +645,40 @@ def _rollback_asar(target_asar, backup_dir):
 # ============================================================
 
 def check_gh_running():
-    """检测 GitHub Desktop 相关进程。"""
-    for proc in ("GitHubDesktop.exe", "Update.exe"):
+    """检测 GitHub Desktop 相关进程（跨平台）。"""
+    if sys.platform == "win32":
+        for proc in ("GitHubDesktop.exe", "Update.exe"):
+            try:
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"IMAGENAME eq {proc}"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if proc in result.stdout:
+                    return True, proc
+            except Exception:
+                continue
+        return False, None
+
+    # macOS / Linux: pgrep
+    for pattern in ("GitHub Desktop", "github-desktop", "GitHubDesktop"):
         try:
             result = subprocess.run(
-                ["tasklist", "/FI", f"IMAGENAME eq {proc}"],
+                ["pgrep", "-f", pattern],
                 capture_output=True, text=True, timeout=5,
             )
-            if proc in result.stdout:
-                return True, proc
+            if result.stdout.strip():
+                return True, pattern
+        except FileNotFoundError:
+            # 回退到 ps
+            try:
+                result = subprocess.run(
+                    ["ps", "-A"], capture_output=True, text=True, timeout=5,
+                )
+                for line in result.stdout.splitlines():
+                    if pattern.lower() in line.lower():
+                        return True, pattern
+            except Exception:
+                continue
         except Exception:
             continue
     return False, None
@@ -655,7 +692,7 @@ def main():
     check_dependencies()
 
     parser = argparse.ArgumentParser(description="Github Desktop 汉化工具")
-    parser.add_argument("--dict", default=None, help="词典文件路径（默认: 同目录下 dict/Windows.zh）")
+    parser.add_argument("--dict", default=None, help="词典文件路径（默认: 同目录下 dict/dictionary.txt）")
     parser.add_argument("--src", default=None, help="Github Desktop resources\\app 目录或 app.asar 文件（默认: 自动探测）")
     parser.add_argument("--output", default=None, help="输出目录（默认: src 同级的 zh_output）")
     parser.add_argument("--backup", default=None, help="备份目录（默认: output 同级的 zh_backup）")
@@ -702,7 +739,7 @@ def _run(args):
         dict_path = os.path.abspath(args.dict)
     else:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        dict_path = os.path.join(script_dir, "..", "dict", "Windows.zh")
+        dict_path = os.path.join(script_dir, "..", "dict", "dictionary.txt")
     dict_path = os.path.normpath(dict_path)
     if not os.path.isfile(dict_path):
         print(f"[ERROR] 词典文件不存在: {dict_path}")

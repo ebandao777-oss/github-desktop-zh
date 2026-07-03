@@ -11,15 +11,18 @@ triggers:
   - 恢复原版
   - 回滚
   - 撤销汉化
-platforms: [windows]
-os: windows
+platforms: [windows, linux, macos]
+os: [windows, linux, macos]
 dependencies:
   python: ">=3.6"
-  system_tools: [reg, tasklist]
+  system_tools:
+    windows: [reg, tasklist]
+    macos: [pgrep]
+    linux: [pgrep]
   optional: [node, asar]
 ---
 
-# Github Desktop 汉化技能
+# Github Desktop 汉化技能（Windows / macOS / Linux）
 
 调用内置脚本自动探测 Github Desktop 安装目录，识别 loose 或 asar 打包模式，使用内置词典执行 JS 字符串字面量替换。
 
@@ -29,7 +32,7 @@ dependencies:
 GitHubDesktop-zh/
 ├── SKILL.md              # 本文件
 ├── dict/
-│   └── Windows.zh        # 汉化词典（首行可声明 # @gh-version: 3.*）
+│   └── dictionary.txt    # 汉化词典（首行可声明 # @gh-version: 3.*）
 └── scripts/
     └── apply_zh.py       # 汉化脚本 v1.1.0
 ```
@@ -57,7 +60,7 @@ python --version
 Test-Path "{技能根目录}/scripts/apply_zh.py"
 
 # ③ 词典存在性
-Test-Path "{技能根目录}/dict/Windows.zh"
+Test-Path "{技能根目录}/dict/dictionary.txt"
 ```
 
 以上任一失败即中断，告知用户缺失项。
