@@ -3,6 +3,14 @@ name: github-desktop-zh
 description: Github Desktop 汉化工具 — 自动探测安装目录（支持 loose 与 asar 打包模式），使用内置词典对 JS 源文件执行字符串字面量替换，完成界面汉化。支持预览、部署、回滚、语法校验。
 version: 1.1.0
 author: "智慧半岛"
+license: MIT
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Shell
+  - Edit
+  - Write
 tags: [github-desktop, 汉化, 本地化, localization, translation]
 triggers:
   - Github Desktop 汉化
